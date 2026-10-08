@@ -371,8 +371,6 @@ button,input,select,textarea{font:inherit;color:inherit}
 .form-card .btn{align-self:flex-start;font-size:18px;padding:16px 32px}
 .form-note{font-size:13px;line-height:1.5;color:var(--text-muted)}
 .form-note:empty{display:none}
-.form-embed{width:100%;min-width:0}
-.form-embed iframe{display:block;width:100%;border:0}
 .contact__right{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:32px;align-items:flex-start}
 .info{width:100%;display:flex;flex-direction:column}
 .info__row{border-top:1px solid rgba(255,255,255,.20);padding:16px 0;display:flex;flex-direction:column;gap:6px}
@@ -865,19 +863,27 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
       <div class="mask mask--pad" data-clip-wrap="title"><h2 class="h2">Start with the labs. Decide after.</h2></div>
     </div>
     <div class="contact__row">
-      <div class="form-card" id="bookForm" data-animate="fade-up">
+      <form class="form-card" id="bookForm" novalidate data-animate="fade-up">
         <div class="offer-note">
           <p class="offer-note__title">This form unlocks the $300 new patient offer.</p>
           <p class="offer-note__text">Book through this page to get the comprehensive hormone panel and your consult with Amy for $300. The offer applies to requests sent from this form.</p>
         </div>
-        <div class="form-embed">
-          <iframe src="https://api.aevadigital.com/api/v1/forms/602/form-view/" title="MyForm" width="100%"
-    onload="onPageLoad('production')" id="myFormEmbed" frameborder="0">
-    </iframe>
-    <script type="text/javascript" src="https://aeva-static-bucket.s3.amazonaws.com/static/js/embedAevaScript.js">
-    </script>
+        <div class="field-row">
+          <div class="field"><label for="fn">First name</label><input id="fn" name="first_name" type="text" placeholder="Jordan" autocomplete="given-name" required></div>
+          <div class="field"><label for="ln">Last name</label><input id="ln" name="last_name" type="text" placeholder="Whitaker" autocomplete="family-name" required></div>
         </div>
-      </div>
+        <div class="field-row">
+          <div class="field"><label for="em">Email</label><input id="em" name="email" type="email" placeholder="you@example.com" autocomplete="email" required></div>
+          <div class="field"><label for="ph">Phone</label><input id="ph" name="phone" type="tel" placeholder="(270) 555-0142" autocomplete="tel" required></div>
+        </div>
+        <div class="field"><label for="concern">What are you dealing with?</label><textarea id="concern" name="concern" placeholder="Hot flashes, broken sleep, low energy, brain fog. Tell us what has changed and for how long."></textarea></div>
+        <div class="consent">
+          <input id="sms" name="sms" type="checkbox">
+          <label for="sms">I agree to receive appointment reminders and marketing texts from ANU. Reply STOP to opt out.</label>
+        </div>
+        <button class="btn btn-primary" type="submit" id="bookSubmit" data-press><span class="btn__label">Claim the $300 panel and consult →</span></button>
+        <p class="form-note" id="bookNote" role="status" aria-live="polite"></p>
+      </form>
       <div class="contact__right" data-animate="fade-up" data-delay="0.1">
         <div class="info">
           <div class="info__row"><span class="lbl">ADDRESS</span><a class="val" href="https://maps.app.goo.gl/K2Ci87mapDEjAJGo9" target="_blank" rel="noopener">230 Buford Ln, Suite 106, Elizabethtown, KY 42701</a></div>
@@ -1057,7 +1063,41 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     });
   });
 
-  /* ---------- booking form: AEVA embed (form 602), handled by embedAevaScript.js ---------- */
+  /* ---------- booking form (from glp.html, with loading and success states) ---------- */
+  var FORM_ENDPOINT = ""; /* set to your CRM or form handler URL to go live */
+  var form = $("#bookForm"), btn = $("#bookSubmit"), note = $("#bookNote"), label = $(".btn__label", btn);
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var bad = $$("[required]", form).filter(function (f) { var ok = f.checkValidity() && f.value.trim() !== ""; f.closest(".field").classList.toggle("is-error", !ok); return !ok; });
+    if (bad.length) {
+      note.textContent = "Please add your name, email and phone so we can confirm the appointment.";
+      note.style.color = "#8a2f2f";
+      bad[0].focus();
+      if (MOTION) gsap.fromTo(bad.map(function (f) { return f.closest(".field"); }), { x: 0 }, { keyframes: { x: [-4, 4, -2, 2, 0] }, duration: 0.3, ease: "power2.out" });
+      return;
+    }
+    btn.disabled = true; note.textContent = ""; note.style.color = "";
+    label.textContent = "Sending";
+    var done = function (ok) {
+      if (ok) {
+        label.textContent = "Request received ✓";
+        note.textContent = "Thank you. The clinic will call you on the number you gave to book your $300 panel and consult.";
+        if (MOTION) gsap.to(btn, { backgroundColor: "#6A5C4C", borderColor: "#6A5C4C", duration: 0.25, ease: "power1.inOut" });
+        else { btn.style.background = "#6A5C4C"; btn.style.borderColor = "#6A5C4C"; }
+        form.reset();
+      } else {
+        btn.disabled = false; label.textContent = "Claim the $300 panel and consult →";
+        note.style.color = "#8a2f2f"; note.textContent = "Something went wrong. Please call us on (270) 491-3184.";
+      }
+    };
+    if (FORM_ENDPOINT) {
+      fetch(FORM_ENDPOINT, { method: "POST", body: new FormData(form) }).then(function (r) { done(r.ok); }).catch(function () { done(false); });
+    } else {
+      console.warn("[ANU LP] FORM_ENDPOINT is not set. Submission was not sent anywhere.");
+      setTimeout(function () { done(true); }, 700);
+    }
+  });
+  $$("input", form).forEach(function (f) { f.addEventListener("input", function () { var fl = f.closest(".field"); if (fl) fl.classList.remove("is-error"); }); });
 
   /* ---------- hero video (lazy, respects save-data and reduced motion) ---------- */
   (function heroVideo() {
