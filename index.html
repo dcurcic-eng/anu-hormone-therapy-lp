@@ -363,6 +363,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .field input:hover,.field textarea:hover{border-color:var(--border-strong)}
 .field input:focus,.field textarea:focus{outline:none;background:#fff;border-color:var(--espresso);box-shadow:0 0 0 3px rgba(57,46,38,.08)}
 .field.is-error input{border-color:#8a2f2f}
+.consent.is-error input{outline:2px solid #8a2f2f;outline-offset:2px;border-radius:3px}
 .field-row{display:flex;gap:16px}
 .field-row>*{flex:1 1 0;min-width:0}
 .consent{display:flex;gap:12px;align-items:flex-start}
@@ -878,7 +879,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
         </div>
         <div class="field"><label for="concern">What are you dealing with?</label><textarea id="concern" name="concern" placeholder="Hot flashes, broken sleep, low energy, brain fog. Tell us what has changed and for how long."></textarea></div>
         <div class="consent">
-          <input id="sms" name="sms" type="checkbox">
+          <input id="sms" name="sms" type="checkbox" required>
           <label for="sms">I agree to receive appointment reminders and marketing texts from ANU. Reply STOP to opt out.</label>
         </div>
         <button class="btn btn-primary" type="submit" id="bookSubmit" data-press><span class="btn__label">Claim the $300 panel and consult →</span></button>
@@ -1063,23 +1064,54 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     });
   });
 
-  /* ---------- booking form (from glp.html, with loading and success states) ---------- */
-  var FORM_ENDPOINT = ""; /* set to your CRM or form handler URL to go live */
+  /* ---------- booking form (AEVA contacts endpoint, with loading and success states) ---------- */
+  var FORM_ENDPOINT = "https://api.aevadigital.com/api/v1/contacts/add_contact_from_form/";
+  var FORM_ID = "602";
+  var ORG_ID = "0a165aaa-3f2a-4b68-b475-66cf5c67cc8a";
   var form = $("#bookForm"), btn = $("#bookSubmit"), note = $("#bookNote"), label = $(".btn__label", btn);
+  var fieldWrap = function (f) { return f.closest(".field") || f.closest(".consent"); };
+  var showError = function (msg, field) {
+    note.style.color = "#8a2f2f"; note.textContent = msg;
+    if (field) { var w = fieldWrap(field); if (w) w.classList.add("is-error"); field.focus(); }
+  };
   form.addEventListener("submit", function (e) {
     e.preventDefault();
-    var bad = $$("[required]", form).filter(function (f) { var ok = f.checkValidity() && f.value.trim() !== ""; f.closest(".field").classList.toggle("is-error", !ok); return !ok; });
+    note.textContent = ""; note.style.color = "";
+    var bad = $$("[required]", form).filter(function (f) {
+      var ok = f.type === "checkbox" ? f.checked : (f.checkValidity() && f.value.trim() !== "");
+      var w = fieldWrap(f); if (w) w.classList.toggle("is-error", !ok);
+      return !ok;
+    });
     if (bad.length) {
-      note.textContent = "Please add your name, email and phone so we can confirm the appointment.";
+      var onlyConsent = bad.length === 1 && bad[0].type === "checkbox";
+      note.textContent = onlyConsent ? "Please agree to receive texts so we can confirm your appointment." : "Please add your name, email and phone so we can confirm the appointment.";
       note.style.color = "#8a2f2f";
       bad[0].focus();
-      if (MOTION) gsap.fromTo(bad.map(function (f) { return f.closest(".field"); }), { x: 0 }, { keyframes: { x: [-4, 4, -2, 2, 0] }, duration: 0.3, ease: "power2.out" });
+      var shake = bad.map(fieldWrap).filter(Boolean);
+      if (MOTION && shake.length) gsap.fromTo(shake, { x: 0 }, { keyframes: { x: [-4, 4, -2, 2, 0] }, duration: 0.3, ease: "power2.out" });
       return;
     }
-    btn.disabled = true; note.textContent = ""; note.style.color = "";
+
+    var firstName = $("#fn", form).value.trim();
+    var lastName = $("#ln", form).value.trim();
+    var email = $("#em", form).value.trim();
+    var phoneRaw = $("#ph", form).value.trim();
+    var message = $("#concern", form).value.trim();
+    var checkbox = $("#sms", form).checked ? "on" : "";
+
+    var emailRe = /^[^\s@]+@[^\s@]+\.[A-Za-z]{2,}$/;
+    if (!emailRe.test(email)) { showError("Please enter a valid email address.", $("#em", form)); return; }
+
+    var phone = phoneRaw.replace(/\D/g, "");
+    if (phone.length === 11 && phone.charAt(0) === "1") phone = phone.slice(1);
+    if (!/^[0-9]{10}$/.test(phone)) { showError("Please enter a 10-digit US phone number.", $("#ph", form)); return; }
+
+    btn.disabled = true;
     label.textContent = "Sending";
     var done = function (ok) {
       if (ok) {
+        window.dataLayer = window.dataLayer || [];
+        window.dataLayer.push({ "event": "form-success" });
         label.textContent = "Request received ✓";
         note.textContent = "Thank you. The clinic will call you on the number you gave to book your $300 panel and consult.";
         if (MOTION) gsap.to(btn, { backgroundColor: "#6A5C4C", borderColor: "#6A5C4C", duration: 0.25, ease: "power1.inOut" });
@@ -1090,14 +1122,34 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
         note.style.color = "#8a2f2f"; note.textContent = "Something went wrong. Please call us on (270) 491-3184.";
       }
     };
-    if (FORM_ENDPOINT) {
-      fetch(FORM_ENDPOINT, { method: "POST", body: new FormData(form) }).then(function (r) { done(r.ok); }).catch(function () { done(false); });
-    } else {
-      console.warn("[ANU LP] FORM_ENDPOINT is not set. Submission was not sent anywhere.");
-      setTimeout(function () { done(true); }, 700);
+
+    var fd = new FormData();
+    fd.append("first_name", firstName);
+    fd.append("last_name", lastName);
+    fd.append("phone", "+1" + phone);
+    fd.append("email", email);
+    fd.append("checkbox", checkbox);
+    fd.append("organization", ORG_ID);
+    fd.append("form", FORM_ID);
+    fd.append("message", message);
+    fd.append("form_location", window.location.href);
+
+    var urlParams = new URLSearchParams(window.location.search);
+    var trackingMap = { gclid: "google", wbraid: "google", gbraid: "google", fbclid: "meta", ttclid: "tiktok" };
+    var trackingParam = "", adSource = "other";
+    for (var key in trackingMap) {
+      var val = urlParams.get(key);
+      if (val) { trackingParam = val; adSource = trackingMap[key]; break; }
     }
+    fd.append("tracking_param", trackingParam);
+    fd.append("ad_source", adSource);
+
+    fetch(FORM_ENDPOINT, { method: "POST", body: fd })
+      .then(function (r) { if (!r.ok) { console.error("[ANU LP] form submit failed", r.status); } done(r.ok); })
+      .catch(function (err) { console.error(err); done(false); });
   });
-  $$("input", form).forEach(function (f) { f.addEventListener("input", function () { var fl = f.closest(".field"); if (fl) fl.classList.remove("is-error"); }); });
+  $$("input, textarea", form).forEach(function (f) { f.addEventListener("input", function () { var fl = fieldWrap(f); if (fl) fl.classList.remove("is-error"); }); });
+  $("#sms", form).addEventListener("change", function () { var fl = fieldWrap(this); if (fl) fl.classList.remove("is-error"); });
 
   /* ---------- hero video (lazy, respects save-data and reduced motion) ---------- */
   (function heroVideo() {
